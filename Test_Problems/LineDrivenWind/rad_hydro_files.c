@@ -153,6 +153,11 @@ main (argc, argv)
   int my_rank;                  // these two variables are used regardless of parallel mode
   int np_mpi;                   // rank and number of processes, 0 and 1 in non-parallel
 
+
+// AM modified part: Calculate original hydro density and electron density
+double rho_hydro, ne_hydro;
+
+
 #ifdef MPI_ON
   MPI_Init (&argc, &argv);
   MPI_Comm_rank (MPI_COMM_WORLD, &my_rank);
@@ -266,7 +271,7 @@ main (argc, argv)
 
   if (zdom[domain].coord_type == SPHERICAL)
   {
-    fprintf (fptr_drive, "i j rcen thetacen F_vis_r F_UV_r F_Xray_r es_f_r bf_f_r\n");  //directional flux by band
+    fprintf (fptr_drive, "i j rcen thetacen vol rho ne F_vis_r F_UV_r F_Xray_r es_f_r bf_f_r\n");  //directional flux by band
     fprintf (fptr_flux, "i j rcen thetacen F_vis_r F_UV_r F_Xray_r \n");        //directional flux by band
   }
   else if (zdom[domain].coord_type == CYLIND)
@@ -359,7 +364,17 @@ main (argc, argv)
       else if (zdom[domain].coord_type == CYLIND)
         fprintf (fptr_hc, "%d %d %e %e %e ", i, j, wmain[nwind].xcen[0], wmain[nwind].xcen[2], vol);    //output geometric things
 
-      fprintf (fptr_hc, "%e %e %e %e ", plasmamain[nplasma].t_e, plasmamain[nplasma].t_r, plasmamain[nplasma].xi, plasmamain[nplasma].ne);  //output t_e, t_r, xi and ne to ease plotting of heating rates
+
+      // AM modified part: Calculate original density and electron density
+      rho_hydro = plasmamain[nplasma].rho * zdom[domain].fill;
+      if (plasmamain[nplasma].rho > 0.0)
+        ne_hydro = plasmamain[nplasma].ne * (rho_hydro / plasmamain[nplasma].rho);
+      else
+        ne_hydro = 0.0;
+
+      // fprintf (fptr_hc, "%e %e %e %e ", plasmamain[nplasma].t_e, plasmamain[nplasma].t_r, plasmamain[nplasma].xi, plasmamain[nplasma].ne);  //output t_e, t_r, xi and ne to ease plotting of heating rates
+
+      fprintf (fptr_hc, "%e %e %e %e ", plasmamain[nplasma].t_e, plasmamain[nplasma].t_r, plasmamain[nplasma].xi, ne_hydro);  //output t_e, t_r, xi and ne to ease plotting of heating rates
       fprintf (fptr_hc, "%e ", (plasmamain[nplasma].heat_photo + plasmamain[nplasma].heat_auger) / vol);        //Xray heating - or photoionization
       fprintf (fptr_hc, "%e ", (plasmamain[nplasma].heat_comp) / vol);  //Compton heating
       fprintf (fptr_hc, "%e ", (plasmamain[nplasma].heat_lines) / vol); //Line heating 28/10/15 - not currently used in zeus
@@ -367,15 +382,27 @@ main (argc, argv)
       fprintf (fptr_hc, "%e ", (plasmamain[nplasma].cool_comp) / vol);  //Compton cooling
       fprintf (fptr_hc, "%e ", (plasmamain[nplasma].lum_lines + plasmamain[nplasma].cool_rr + plasmamain[nplasma].cool_dr) / vol);      //Line cooling must include all recombination cooling
       fprintf (fptr_hc, "%e ", (plasmamain[nplasma].lum_ff) / vol);     //ff cooling
-      fprintf (fptr_hc, "%e ", plasmamain[nplasma].rho);        //density
-      fprintf (fptr_hc, "%e \n", plasmamain[nplasma].rho * rho2nh);     //hydrogen number density
+      fprintf (fptr_hc, "%e ", rho_hydro);        //density
+      fprintf (fptr_hc, "%e \n", rho_hydro * rho2nh);     //hydrogen number density
+
+      // fprintf (fptr_hc, "%e ", plasmamain[nplasma].rho);        //density
+      // fprintf (fptr_hc, "%e \n", plasmamain[nplasma].rho * rho2nh);     //hydrogen number density
 
       if (zdom[domain].coord_type == SPHERICAL || zdom[domain].coord_type == RTHETA)
       {
+
+        // AM modified part: Calculate original density and electron density
+        rho_hydro = plasmamain[nplasma].rho * zdom[domain].fill;
+        if (plasmamain[nplasma].rho > 0.0)
+          ne_hydro = plasmamain[nplasma].ne * (rho_hydro / plasmamain[nplasma].rho);
+        else
+          ne_hydro = 0.0;
+
         fprintf (fptr_drive, "%d %d %e %e %e ", i, j, wmain[nwind].rcen, wmain[nwind].thetacen / RADIAN, vol);  //output geometric things
         fprintf (fptr_pcon, "%d %d %e %e ", i, j, wmain[nwind].rcen, wmain[nwind].thetacen / RADIAN);   //output geometric things
-        fprintf (fptr_drive, "%e ", plasmamain[nplasma].rho);   //density
-        fprintf (fptr_drive, "%e ", plasmamain[nplasma].ne);
+        // fprintf (fptr_drive, "%e ", plasmamain[nplasma].rho);   //density
+        fprintf (fptr_drive, "%e ", rho_hydro);   //density
+        fprintf (fptr_drive, "%e ", ne_hydro);
         fprintf (fptr_flux, "%d %d %e %e ", i, j, wmain[nwind].rcen, wmain[nwind].thetacen / RADIAN);   //output geometric things
       }
       else if (zdom[domain].coord_type == CYLIND)
@@ -436,12 +463,19 @@ main (argc, argv)
 
       //We need to compute the g factor for this cell and output it.
 
+      // AM modified part: Calculate original density and electron density
+      rho_hydro = plasmamain[nplasma].rho * zdom[domain].fill;
+      if (plasmamain[nplasma].rho > 0.0)
+        ne_hydro = plasmamain[nplasma].ne * (rho_hydro / plasmamain[nplasma].rho);
+      else
+        ne_hydro = 0.0;
 
       v_th = pow ((2. * BOLTZMANN * plasmamain[nplasma].t_e / MPROT), 0.5);     //We need the thermal velocity for hydrogen
 //      v_th = 4.2e5;
       stuff_v (wmain[nwind].xcen, ptest.x);     //place our test photon at the centre of the cell
       ptest.grid = nwind;       //We need our test photon to know where it is
-      kappa_es = THOMPSON * plasmamain[nplasma].ne / plasmamain[nplasma].rho;
+      kappa_es = THOMPSON * ne_hydro / rho_hydro;
+      // kappa_es = THOMPSON * plasmamain[nplasma].ne / plasmamain[nplasma].rho;
       kappa_es = THOMPSON / MPROT;
 
       //First for the optcial band (up to 4000AA)
@@ -464,7 +498,8 @@ main (argc, argv)
         else
         {
           stuff_v (fhat, ptest.lmn);    //place our test photon at the centre of the cell
-          t_opt = kappa_es * plasmamain[nplasma].rho * v_th / fabs (dvwind_ds_cmf (&ptest));
+          // t_opt = kappa_es * plasmamain[nplasma].rho * v_th / fabs (dvwind_ds_cmf (&ptest));
+          t_opt = kappa_es * rho_hydro * v_th / fabs (dvwind_ds_cmf (&ptest));
         }
       }
       else
@@ -490,7 +525,8 @@ main (argc, argv)
         else
         {
           stuff_v (fhat, ptest.lmn);    //place our test photon at the centre of the cell
-          t_UV = kappa_es * plasmamain[nplasma].rho * v_th / fabs (dvwind_ds_cmf (&ptest));
+          // t_UV = kappa_es * plasmamain[nplasma].rho * v_th / fabs (dvwind_ds_cmf (&ptest));
+          t_UV = kappa_es * rho_hydro * v_th / fabs (dvwind_ds_cmf (&ptest));
         }
       }
       else
@@ -517,14 +553,26 @@ main (argc, argv)
         else
         {
           stuff_v (fhat, ptest.lmn);    //place our test photon at the centre of the cell
-          t_Xray = kappa_es * plasmamain[nplasma].rho * v_th / fabs (dvwind_ds_cmf (&ptest));
+          // t_Xray = kappa_es * plasmamain[nplasma].rho * v_th / fabs (dvwind_ds_cmf (&ptest));
+          t_Xray = kappa_es * rho_hydro * v_th / fabs (dvwind_ds_cmf (&ptest));
         }
       }
       else
         t_Xray = 0.0;           //Essentually a flag that there is no way of computing t (and hence M) in this cell.
 
-      fprintf (fptr_pcon, " %e %e %e %e %e %e %e\n", plasmamain[nplasma].t_e, plasmamain[nplasma].rho,
-               plasmamain[nplasma].rho * rho2nh, plasmamain[nplasma].ne, t_opt, t_UV, t_Xray);
+
+      // AM modified part: Calculate original density and electron density
+      rho_hydro = plasmamain[nplasma].rho * zdom[domain].fill;
+      if (plasmamain[nplasma].rho > 0.0)
+        ne_hydro = plasmamain[nplasma].ne * (rho_hydro / plasmamain[nplasma].rho);
+      else
+        ne_hydro = 0.0;
+
+      fprintf(fptr_pcon, " %e %e %e %e %e %e %e\n", plasmamain[nplasma].t_e, rho_hydro,
+              rho_hydro * rho2nh, ne_hydro, t_opt, t_UV, t_Xray);
+
+      // fprintf (fptr_pcon, " %e %e %e %e %e %e %e\n", plasmamain[nplasma].t_e, plasmamain[nplasma].rho,
+      //          plasmamain[nplasma].rho * rho2nh, plasmamain[nplasma].ne, t_opt, t_UV, t_Xray);
 
       fprintf (fptr_debug, "%d %d %e %e %e %e %e\n", i, j, wmain[nwind].rcen, wmain[nwind].thetacen / RADIAN, v_th, fabs (dvwind_ds_cmf (&ptest)), plasmamain[nplasma].j);      //output geometric things
     }

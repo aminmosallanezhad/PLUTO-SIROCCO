@@ -20,7 +20,6 @@
 */
 /* ///////////////////////////////////////////////////////////////////// */
 
-
 #include "pluto.h"
 
 #define LINELENGTH 800  /*!< Maximum line length when reading files */
@@ -41,39 +40,45 @@ double gFlux_r, gFlux_t, gFlux_p;
  *********************************************************************** */
 
 void read_sirocco_fluxes(Data *d, Grid *grid)
-
 {
     int i, j;
     long int k;
-    FILE *fptr;                       // File pointer
-    char aline[LINELENGTH];           // Buffer for reading lines from the file
-    long int ii, jj, kk, nwords;      // Variables for parsing data
-    double x1in, x2in;                // Coordinates from file
-    double kradin, alpharadin, rhoin; // Radiation parameters from file (unused here)
-    double krad, alpharad;            // Radiation parameters from input
-    double temp;                      // Temporary variable for reading data
-    int iflux;                        // Flux index
-    int icount, iaxis, match;         // Counters and flags
-    double *x1 = grid->x[IDIR];       // Radial coordinate array
-    double *x2 = grid->x[JDIR];       // Angular coordinate array
-    double tol = 1e-6;                // Tolerance for matching coordinates
+    FILE *fptr;                       /* File pointer */
+    char aline[LINELENGTH];           /* Buffer for reading lines from the file */
+    long int ii, jj, kk, nwords;      /* Variables for parsing data */
+    double x1in, x2in;                /* Coordinates from file */
+    double kradin, alpharadin, rhoin; /* Radiation parameters from file (unused here) */
+    double krad, alpharad;            /* Radiation parameters from input */
+    double temp;                      /* Temporary variable for reading data */
+    int iflux;                        /* Flux index */
+    int icount, iaxis, match;         /* Counters and flags */
+    double *x1;                       /* Radial coordinate array */
+    double *x2;                       /* Angular coordinate array */
+    double tol;                       /* Tolerance for matching coordinates */
+    int m;                            /* Index for monotonicity check */
 
-    kk = 0;                           // Reset kk
-    krad = g_inputParam[KRAD];        // Radiation parameter from input
-    alpharad = g_inputParam[ALPHARAD];// Radiation parameter from input
+    x1  = grid->x[IDIR];       /* Radial coordinate array */
+    x2  = grid->x[JDIR];       /* Angular coordinate array */
+    tol = 1e-6;                /* Tolerance for matching coordinates */
+
+    kk       = 0;                           /* Reset kk */
+    krad     = g_inputParam[KRAD];          /* Radiation parameter from input */
+    alpharad = g_inputParam[ALPHARAD];      /* Radiation parameter from input */
 
     printf("Arrived in read_sirocco_fluxes IBEG=%li JBEG=%li\n", IBEG, JBEG);
     printf("Reading in fluxes from SIROCCO\n");
 
     /* Loop over three axes: r, theta, phi */
     for (iaxis = 0; iaxis < 3; iaxis++) {
+
         /* Open the corresponding flux file */
-        if (iaxis == 0)
+        if (iaxis == 0) {
             fptr = fopen("directional_flux_r.dat", "r");
-        else if (iaxis == 1)
+        } else if (iaxis == 1) {
             fptr = fopen("directional_flux_theta.dat", "r");
-        else if (iaxis == 2)
+        } else {
             fptr = fopen("directional_flux_phi.dat", "r");
+        }
 
         if (fptr == NULL) {
             printf("No flux file\n");
@@ -121,7 +126,7 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
         }
 
         icount = 0;
-        match = 0;
+        match  = 0;
 
         /* Read flux data line by line */
         while (fscanf(fptr, "%ld ", &ii) != EOF) {
@@ -133,12 +138,15 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
                         /* Assign fluxes to the corresponding cell */
                         for (iflux = 0; iflux < NFLUX_ANGLES; iflux++) {
                             if (fscanf(fptr, "%le", &temp) == 1) {
-                                if (iaxis == 0)
+                                if (iaxis == 0) {
                                     flux_r_UV[iflux][k][j][i] = temp;
-                                if (iaxis == 1)
+                                }
+                                if (iaxis == 1) {
                                     flux_t_UV[iflux][k][j][i] = temp;
-                                if (iaxis == 2)
+                                }
+                                if (iaxis == 2) {
                                     flux_p_UV[iflux][k][j][i] = temp;
+                                }
                             } else {
                                 printf("Error in reading flux file\n");
                                 exit(0);
@@ -167,8 +175,7 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
         fclose(fptr);
     }
 
-
-    /* Convert fluxes to spherical coordinates */
+    /* Convert fluxes to spherical coordinates (currently just copying into globals) */
     for (iflux = 0; iflux < NFLUX_ANGLES; iflux++) {
         DOM_LOOP(k, j, i) {
             gFlux_r = flux_r_UV[iflux][k][j][i];
@@ -191,32 +198,51 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
                 printf("Error reading aline\n");
                 exit(0);
             }
+
             /* Read the number of M points */
             nwords = sscanf(aline, "%*s %ld", &ii);
             MPOINTS = ii;
             printf("There are %i points in the force multiplier fits\n", MPOINTS);
+
             /* Allocate memory for M_UV_fit */
             M_UV_fit = ARRAY_4D(MPOINTS, NX3_TOT, NX2_TOT, NX1_TOT, double);
 
-            /* Read t_fit values */
+            /* Read t_fit values header skip */
             if (fscanf(fptr, "%*s ") == 0) {
-                /* Skip header */
+                /* Skip header token */
             } else {
                 printf("Error in reading geometry from force multiplier file\n");
                 exit(0);
             }
+
             t_fit = calloc(MPOINTS, sizeof(double));
 
+            /* --- SAFER t_fit READING: guard non-positive values --- */
             for (iflux = 0; iflux < MPOINTS; iflux++) {
                 if (fscanf(fptr, "%le", &temp) == 1) {
+                    if (temp <= 0.0 || !isfinite(temp)) {
+                        printf("Warning: non-positive t_fit value in M_UV_data.dat at index %d: %e, "
+                               "clamping to 1e-30\n", iflux, temp);
+                        temp = 1.0e-30;
+                    }
                     t_fit[iflux] = log10(temp);
                 } else {
-                    printf("Error in reading force multiplier file\n");
+                    printf("Error in reading force multiplier file (t_fit)\n");
                     exit(0);
                 }
             }
+
+            /* Optional: check monotonicity of t_fit */
+            for (m = 1; m < MPOINTS; m++) {
+                if (!(t_fit[m] > t_fit[m - 1])) {
+                    printf("Warning: t_fit not strictly increasing at m=%d: %e <= %e\n",
+                           m, t_fit[m], t_fit[m - 1]);
+                }
+            }
+
             icount = 0;
-            match = 0;
+            match  = 0;
+
             /* Read force multiplier data line by line */
             while (fscanf(fptr, "%ld ", &ii) != EOF) {
                 if (fscanf(fptr, "%ld %le %le", &jj, &x1in, &x2in) == 3) {
@@ -227,9 +253,15 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
                             /* Assign M_UV_fit values to the corresponding cell */
                             for (iflux = 0; iflux < MPOINTS; iflux++) {
                                 if (fscanf(fptr, "%le", &temp) == 1) {
+                                    if (temp <= 0.0 || !isfinite(temp)) {
+                                        printf("Warning: non-positive M_UV value in M_UV_data.dat at "
+                                               "i=%ld j=%ld m=%d: %e, clamping to 1e-30\n",
+                                               ii, jj, iflux, temp);
+                                        temp = 1.0e-30;
+                                    }
                                     M_UV_fit[iflux][k][j][i] = log10(temp);
                                 } else {
-                                    printf("Error in reading force multiplier file\n");
+                                    printf("Error in reading force multiplier file (M_UV_fit)\n");
                                     exit(0);
                                 }
                             }
@@ -241,14 +273,14 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
                         /* Skip values if no matching cell is found */
                         for (iflux = 0; iflux < MPOINTS; iflux++) {
                             if (fscanf(fptr, "%le", &temp) != 1) {
-                                printf("Error in reading force multiplier file\n");
+                                printf("Error in reading force multiplier file (skip branch)\n");
                                 exit(0);
                             }
                         }
                     }
                     match = 0;
                 } else {
-                    printf("Error in reading force multiplier file\n");
+                    printf("Error in reading force multiplier file (header line)\n");
                     exit(0);
                 }
             }
@@ -259,33 +291,33 @@ void read_sirocco_fluxes(Data *d, Grid *grid)
         printf("Using k=%e alpha=%e for all cells\n", krad, alpharad);
     }
     printf("Not using accelerations from SIROCCO\n");
-
 }
 
-
+/* ********************************************************************* */
 
 void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
-
 {
-    int i, j, k;              // Loop indices
-    FILE *fptr, *fptr_hc;     // File pointers
-    char aline[LINELENGTH];   // Buffer for reading lines from files
-    int ii, jj, nwords;       // Variables for parsing data
-    double dens;              // Density from file
-    double comp_h_pre, comp_c_pre, xray_h_pre, brem_c_pre, line_c_pre, xi_ion_pre; // Precomputed factors
-    double rcen, thetacen;    // Cell center coordinates from file
-    int icount;               // Counter for successful reads
+    int i, j, k;              /* Loop indices */
+    FILE *fptr, *fptr_hc;     /* File pointers */
+    char aline[LINELENGTH];   /* Buffer for reading lines from files */
+    int ii, jj, nwords;       /* Variables for parsing data */
+    double dens;              /* Density from file */
+    double comp_h_pre, comp_c_pre, xray_h_pre, brem_c_pre, line_c_pre, xi_ion_pre; /* Precomputed factors */
+    double rcen, thetacen;    /* Cell center coordinates from file */
+    int icount;               /* Counter for successful reads */
 
     #if (BODY_FORCE & VECTOR)
-    double gr, gt, gp;        // Body force components (unused here)
+    double gr, gt, gp;        /* Body force components (unused here) */
     #endif
 
-    // Physical quantities
+    /* Physical quantities */
     double r, nH, rho, lx;
     double vol, t_e, t_r, xi, ne, heat_xray, heat_comp, heat_lines, heat_ff;
     double cool_comp, cool_lines, cool_ff, rho_s, n_h;
 
-    double tol = 1e-5;        // Tolerance for matching coordinates
+    double tol;               /* Tolerance for matching coordinates */
+
+    tol = 1e-5;
 
     /* ---------------------- Initialization Phase ----------------------- */
     if (flag == 0) {
@@ -294,10 +326,10 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
         /* Initialize ionization parameters for each cell */
         DOM_LOOP(k, j, i) {
             #if COOLING != NO
-            rho = d->Vc[RHO][k][j][i] * UNIT_DENSITY;       // Density in real units
-            r   = grid->x[IDIR][i] * UNIT_LENGTH;           // Radial coordinate in real units
-            nH  = rho / (1.43 * CONST_mp);                  // Hydrogen number density
-            lx  = g_inputParam[L_star] * g_inputParam[f_x]; // X-ray luminosity
+            rho = d->Vc[RHO][k][j][i] * UNIT_DENSITY;       /* Density in real units */
+            r   = grid->x[IDIR][i] * UNIT_LENGTH;           /* Radial coordinate in real units */
+            nH  = rho / (1.43 * CONST_mp);                  /* Hydrogen number density */
+            lx  = g_inputParam[L_star] * g_inputParam[f_x]; /* X-ray luminosity */
 
             /* Initialize ionization parameter and radiation temperature */
             d->sirocco_xi[k][j][i]  = lx / nH / (r * r);
@@ -330,7 +362,7 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
                 exit(0);
             }
 
-            icount = 0; // Initialize counter
+            icount = 0; /* Initialize counter */
 
             /* Read data line by line */
             while (fgets(aline, LINELENGTH, fptr_hc) != NULL) {
@@ -356,11 +388,11 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
                             /* Update ionization parameter and radiation temperature */
                             icount++;
                             #if COOLING != NO
-                              d->sirocco_xi[k][j][i]  = xi;
-                              d->sirocco_t_r[k][j][i] = t_r;
+                            d->sirocco_xi[k][j][i]  = xi;
+                            d->sirocco_t_r[k][j][i] = t_r;
 
-                              if (d->sirocco_xi[k][j][i] < 1.0) d->sirocco_xi[k][j][i] = 1.0;
-                              if (d->sirocco_t_r[k][j][i] < 1.e3) d->sirocco_t_r[k][j][i] = 1.e3;
+                            if (d->sirocco_xi[k][j][i] < 1.0)  d->sirocco_xi[k][j][i]  = 1.0;
+                            if (d->sirocco_t_r[k][j][i] < 1.e3) d->sirocco_t_r[k][j][i] = 1.e3;
                             #endif
                         }
                     }
@@ -383,12 +415,12 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
         /* Initialize prefactors for each cell */
         DOM_LOOP(k, j, i) {
             #if COOLING != NO
-              d->comp_h_pre[k][j][i] = 1.0;
-              d->comp_c_pre[k][j][i] = 1.0;
-              d->xray_h_pre[k][j][i] = 1.0;
-              d->line_c_pre[k][j][i] = 1.0;
-              d->brem_c_pre[k][j][i] = 1.0;
-              d->xi_ion_pre[k][j][i] = 1.0;
+            d->comp_h_pre[k][j][i] = 1.0;
+            d->comp_c_pre[k][j][i] = 1.0;
+            d->xray_h_pre[k][j][i] = 1.0;
+            d->line_c_pre[k][j][i] = 1.0;
+            d->brem_c_pre[k][j][i] = 1.0;
+            d->xi_ion_pre[k][j][i] = 1.0;
             #endif
         }
         printf("Initialised\n");
@@ -399,24 +431,24 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
             printf("NO prefactor file\n");
             DOM_LOOP(k, j, i) {
                 #if COOLING != NO
-                  d->comp_h_pre[k][j][i] = 1.0;
-                  d->comp_c_pre[k][j][i] = 1.0;
-                  d->xray_h_pre[k][j][i] = 1.0;
-                  d->line_c_pre[k][j][i] = 1.0;
-                  d->brem_c_pre[k][j][i] = 1.0;
-                  d->xi_ion_pre[k][j][i] = 1.0;
+                d->comp_h_pre[k][j][i] = 1.0;
+                d->comp_c_pre[k][j][i] = 1.0;
+                d->xray_h_pre[k][j][i] = 1.0;
+                d->line_c_pre[k][j][i] = 1.0;
+                d->brem_c_pre[k][j][i] = 1.0;
+                d->xi_ion_pre[k][j][i] = 1.0;
                 #endif
             }
         } else {
             /* Initialize prefactors to detect missing data */
             DOM_LOOP(k, j, i) {
                 #if COOLING != NO
-                  d->comp_h_pre[k][j][i] = 1.0;
-                  d->comp_c_pre[k][j][i] = 1.0;
-                  d->xray_h_pre[k][j][i] = 1.0;
-                  d->line_c_pre[k][j][i] = 1.0;
-                  d->brem_c_pre[k][j][i] = 1.0;
-                  d->xi_ion_pre[k][j][i] = 1.0;
+                d->comp_h_pre[k][j][i] = 1.0;
+                d->comp_c_pre[k][j][i] = 1.0;
+                d->xray_h_pre[k][j][i] = 1.0;
+                d->line_c_pre[k][j][i] = 1.0;
+                d->brem_c_pre[k][j][i] = 1.0;
+                d->xi_ion_pre[k][j][i] = 1.0;
                 #endif
             }
 
@@ -426,7 +458,7 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
                 exit(0);
             }
 
-            icount = 0; // Initialize counter
+            icount = 0; /* Initialize counter */
 
             /* Read data line by line */
             while (fgets(aline, LINELENGTH, fptr) != NULL) {
@@ -451,12 +483,12 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
                             /* Update prefactors */
                             icount++;
                             #if COOLING != NO
-                              d->comp_h_pre[k][j][i] = comp_h_pre;
-                              d->comp_c_pre[k][j][i] = comp_c_pre;
-                              d->xray_h_pre[k][j][i] = xray_h_pre;
-                              d->line_c_pre[k][j][i] = line_c_pre;
-                              d->brem_c_pre[k][j][i] = brem_c_pre;
-                              d->xi_ion_pre[k][j][i] = xi_ion_pre;
+                            d->comp_h_pre[k][j][i] = comp_h_pre;
+                            d->comp_c_pre[k][j][i] = comp_c_pre;
+                            d->xray_h_pre[k][j][i] = xray_h_pre;
+                            d->line_c_pre[k][j][i] = line_c_pre;
+                            d->brem_c_pre[k][j][i] = brem_c_pre;
+                            d->xi_ion_pre[k][j][i] = xi_ion_pre;
                             #endif
                         }
                     }
@@ -496,324 +528,374 @@ void read_sirocco_heatcool(Data *d, Grid *grid, int flag)
     }
 }
 
-
-
+/* ********************************************************************* */
 
 #if LINE_DRIVEN_WIND != NO
 
 void VGradCalc(const Data *d, Grid *grid)
-
 {
+    int i, j, k;
+    double v11[2], v12[2], v22[2], v21[2];
+    double v1, v2, dx1, dx2;
+    double x11[2], x22[2], flux_x, flux_z;
+    double loc[2], ans1[2], ans2[2], mod_flux;
 
-  int i, j, k;
-  double v11[2], v12[2], v22[2], v21[2];
-  double v1, v2, dx1, dx2;
-  double x11[2], x22[2], flux_x, flux_z;
-  double loc[2], ans1[2], ans2[2], mod_flux;
+    double *x1;
+    double *x2;
+    double *x3;
 
-  double *x1 = grid->x[IDIR];
-  double *x2 = grid->x[JDIR];
-  double *x3 = grid->x[KDIR];
+    double *x1l;
+    double *x2l;
+    double *x3l;
 
-  double *x1l = grid->xl[IDIR];
-  double *x2l = grid->xl[JDIR];
-  double *x3l = grid->xl[KDIR];
+    double *x1r;
+    double *x2r;
+    double *x3r;
 
-  double *x1r = grid->xr[IDIR];
-  double *x2r = grid->xr[JDIR];
-  double *x3r = grid->xr[KDIR];
+    double x, z;
+    double vx1, vz1, vx2, vz2;
+    double ds, maxds;
+    double theta_angle;
+    int iangle;
 
-  double x, z;
-  double vx1, vz1, vx2, vz2;
-  double ds, maxds;
-	double theta_angle;
-  int iangle;
+    x1  = grid->x[IDIR];
+    x2  = grid->x[JDIR];
+    x3  = grid->x[KDIR];
 
- /* this is the first time here, so we need to set up a few things that wont change */
+    x1l = grid->xl[IDIR];
+    x2l = grid->xl[JDIR];
+    x3l = grid->xl[KDIR];
 
-  if (dvds_setup_flag == 0) {
+    x1r = grid->xr[IDIR];
+    x2r = grid->xr[JDIR];
+    x3r = grid->xr[KDIR];
 
-  /* set up the various arrays to hold the offsets for each angular bin */
-	printf ("Setting up dvds calculation arrays\n");
+    /* this is the first time here, so we need to set up a few things that wont change */
+    if (dvds_setup_flag == 0) {
 
-  dvds_r_offset   = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
-  dvds_t_offset   = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
-  dvds_mod_offset = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
+        /* set up the various arrays to hold the offsets for each angular bin */
+        printf("Setting up dvds calculation arrays\n");
 
-	/* set up the array for the dvds array - one value for each flux bin */
-  dvds_array = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
+        dvds_r_offset   = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
+        dvds_t_offset   = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
+        dvds_mod_offset = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
 
-	printf ("Set up arrays\n");
+        /* set up the array for the dvds array - one value for each flux bin */
+        dvds_array      = ARRAY_4D(NFLUX_ANGLES, NX3_TOT, NX2_TOT, NX1_TOT, double);
 
-	for (iangle = 0; iangle < NFLUX_ANGLES; iangle++) {
+        printf("Set up arrays\n");
 
-		/* now compute dvdr for use in line driving calculations */
-	  DOM_LOOP(k,j,i) {
+        for (iangle = 0; iangle < NFLUX_ANGLES; iangle++) {
 
-		/* the points at which interpolations are carried out never change */
+            /* now compute dvdr for use in line driving calculations */
+            DOM_LOOP(k, j, i) {
 
-	     x11_interp[0][k][j][i] = (x1[i - 1] + x1[i]) / 2.0 * UNIT_LENGTH;
-	     x11_interp[1][k][j][i] = (x2[j - 1] + x2[j]) / 2.0;
+                /* the points at which interpolations are carried out never change */
 
-	     x22_interp[0][k][j][i] = (x1[i + 1] + x1[i]) / 2.0 * UNIT_LENGTH;
-	     x22_interp[1][k][j][i] = (x2[j + 1] + x2[j]) / 2.0;
+                x11_interp[0][k][j][i] = (x1[i - 1] + x1[i]) / 2.0 * UNIT_LENGTH;
+                x11_interp[1][k][j][i] = (x2[j - 1] + x2[j]) / 2.0;
 
-       /* we can also compute the second location to compute the velocity
-          in each cell - that just depends on the flux
-          first we work out how far we want to move in this cell */
+                x22_interp[0][k][j][i] = (x1[i + 1] + x1[i]) / 2.0 * UNIT_LENGTH;
+                x22_interp[1][k][j][i] = (x2[j + 1] + x2[j]) / 2.0;
 
-       /* the x1 distance between intepolation centres in real units. */
-	     maxds = fabs(x22_interp[0][k][j][i] - x11_interp[0][k][j][i]);
+                /* we can also compute the second location to compute the velocity
+                   in each cell - that just depends on the flux
+                   first we work out how far we want to move in this cell */
 
-			 /* approximate linear distance across the interpolation centres */
+                /* the x1 distance between intepolation centres in real units. */
+                maxds = fabs(x22_interp[0][k][j][i] - x11_interp[0][k][j][i]);
 
-	     #if GEOMETRY == SPHERICAL
-	        if (maxds > (x1[i] * UNIT_LENGTH * fabs(x22_interp[1][k][j][i] - x11_interp[1][k][j][i]))) {
-	            maxds =  x1[i] * UNIT_LENGTH * fabs(x22_interp[1][k][j][i] - x11_interp[1][k][j][i]);
-	        }
-	     #endif
+                /* approximate linear distance across the interpolation centres */
 
-       /* this should mean than the distance we move to compute dv/ds is within the interpolation grid */
+                #if GEOMETRY == SPHERICAL
+                if (maxds > (x1[i] * UNIT_LENGTH * fabs(x22_interp[1][k][j][i] - x11_interp[1][k][j][i]))) {
+                    maxds =  x1[i] * UNIT_LENGTH * fabs(x22_interp[1][k][j][i] - x11_interp[1][k][j][i]);
+                }
+                #endif
 
-	     maxds /= 2.0;
+                /* this should mean than the distance we move to compute dv/ds is within the interpolation grid */
 
-       /* we now need the direction to move for the disk flux
-			 - that depends on the flux - we first work out the modulus of the flux */
+                maxds /= 2.0;
 
-			 mod_flux = sqrt(pow(flux_r_UV[iangle][k][j][i], 2)
-				        +      pow(flux_t_UV[iangle][k][j][i], 2)
-								+      pow(flux_p_UV[iangle][k][j][i], 2));
+                /* we now need the direction to move for the disk flux
+                   - that depends on the flux - we first work out the modulus of the flux */
 
-       /* there is no flux in this cell - capture the issue with a flag */
-				if (mod_flux == 0.0) {
-	         dvds_mod_offset[iangle][k][j][i] = -999;  /* the fact that this is negative acts as the flag */
-	       }else {
+                mod_flux = sqrt(pow(flux_r_UV[iangle][k][j][i], 2)
+                             +   pow(flux_t_UV[iangle][k][j][i], 2)
+                             +   pow(flux_p_UV[iangle][k][j][i], 2));
 
+                /* there is no flux in this cell - capture the issue with a flag */
+                if (mod_flux == 0.0) {
+                    dvds_mod_offset[iangle][k][j][i] = -999;  /* the fact that this is negative acts as the flag */
+                } else {
 
-					 /* get the cell centre in cartesian coords */
-	         #if GEOMETRY == SPHERICAL
-	            x = x1[i] * sin(x2[j]) * UNIT_LENGTH;
-	            z = x1[i] * cos(x2[j]) * UNIT_LENGTH;
+                    /* get the cell centre in cartesian coords */
+                    #if GEOMETRY == SPHERICAL
+                    x = x1[i] * sin(x2[j]) * UNIT_LENGTH;
+                    z = x1[i] * cos(x2[j]) * UNIT_LENGTH;
 
-						  theta_angle = (iangle + 0.5) * (2.0 * CONST_PI) / 36.0;
-							dx1 = maxds * sin(theta_angle);
-							dx2 = maxds * cos(theta_angle);
+                    theta_angle = (iangle + 0.5) * (2.0 * CONST_PI) / 36.0;
+                    dx1         = maxds * sin(theta_angle);
+                    dx2         = maxds * cos(theta_angle);
 
-							 /* this is belt and braces - it *should* be equal to maxds */
-	             ds  = sqrt(dx1 * dx1 + dx2 * dx2);
+                    /* this is belt and braces - it *should* be equal to maxds */
+                    ds  = sqrt(dx1 * dx1 + dx2 * dx2);
 
-               /* go back to spherical coordinates because the interpolation
-							 routine works in r,theta and store the locations on a global
-							 array for constant use */
+                    /* go back to spherical coordinates because the interpolation
+                       routine works in r,theta and store the locations on a global
+                       array for constant use */
 
-							 dvds_r_offset[iangle][k][j][i] = sqrt((x + dx1) * (x + dx1)
-									                            +      (z + dx2) * (z + dx2));
+                    dvds_r_offset[iangle][k][j][i] = sqrt((x + dx1) * (x + dx1)
+                                                       +    (z + dx2) * (z + dx2));
 
-	             dvds_t_offset[iangle][k][j][i] = atan((x + dx1) / (z + dx2));
+                    dvds_t_offset[iangle][k][j][i] = atan((x + dx1) / (z + dx2));
 
-							 dvds_mod_offset[iangle][k][j][i] = ds;
-	           #endif
-	        }
-	    	} // End of DOM loop for initialising the first time round
+                    dvds_mod_offset[iangle][k][j][i] = ds;
+                    #endif
+                }
+            } /* End of DOM loop for initialising the first time round */
 
-/* - everything after this point is done every time */
+            /* - everything after this point is done every time */
 
-		} // END of (iangle = 0; iangle < NFLUX_ANGLES; iangle++)
-		printf ("Finished creating the dvds arrays\n");
-	  dvds_setup_flag = 1;
+        } /* END of (iangle = 0; iangle < NFLUX_ANGLES; iangle++) */
 
-	} // END of (dvds_setup_flag == 0)
+        printf("Finished creating the dvds arrays\n");
+        dvds_setup_flag = 1;
 
+    } /* END of (dvds_setup_flag == 0) */
 
-	for (iangle = 0; iangle < NFLUX_ANGLES; iangle++) {
+    for (iangle = 0; iangle < NFLUX_ANGLES; iangle++) {
 
-		 /* now compute dvdr for use in line driving calculations */
-	   DOM_LOOP(k,j,i) {
+        /* now compute dvdr for use in line driving calculations */
+        DOM_LOOP(k, j, i) {
 
-	        /* firstly, compute the velocity at the interpolation vertices vertices
-	           if we simply compute the mean velocity at four points equidistant
-						 from the surrounding cell centers, thats fine - the locations
-						 dont matter. */
+            /* firstly, compute the velocity at the interpolation vertices vertices
+               if we simply compute the mean velocity at four points equidistant
+               from the surrounding cell centers, thats fine - the locations
+               dont matter. */
 
-	        v11[0] = (d->Vc[VX1][k][j - 1][i - 1] + d->Vc[VX1][k][j-1][i]
-						     +  d->Vc[VX1][k][j][i - 1]     + d->Vc[VX1][k][j][i]) / 4.0;
+            v11[0] = (d->Vc[VX1][k][j - 1][i - 1] + d->Vc[VX1][k][j - 1][i]
+                   +  d->Vc[VX1][k][j][i - 1]     + d->Vc[VX1][k][j][i]) / 4.0;
 
-	        v11[1] = (d->Vc[VX2][k][j - 1][i - 1] + d->Vc[VX2][k][j - 1][i]
-						     +  d->Vc[VX2][k][j][i - 1]     + d->Vc[VX2][k][j][i]) / 4.0;
+            v11[1] = (d->Vc[VX2][k][j - 1][i - 1] + d->Vc[VX2][k][j - 1][i]
+                   +  d->Vc[VX2][k][j][i - 1]     + d->Vc[VX2][k][j][i]) / 4.0;
 
-	        v12[0] = (d->Vc[VX1][k][j + 1][i - 1] + d->Vc[VX1][k][j][i - 1]
-						     +  d->Vc[VX1][k][j + 1][i]     + d->Vc[VX1][k][j][i]) / 4.0;
+            v12[0] = (d->Vc[VX1][k][j + 1][i - 1] + d->Vc[VX1][k][j][i - 1]
+                   +  d->Vc[VX1][k][j + 1][i]     + d->Vc[VX1][k][j][i]) / 4.0;
 
-	        v12[1] = (d->Vc[VX2][k][j + 1][i - 1] + d->Vc[VX2][k][j][i - 1]
-						     +  d->Vc[VX2][k][j + 1][i]     + d->Vc[VX2][k][j][i]) / 4.0;
+            v12[1] = (d->Vc[VX2][k][j + 1][i - 1] + d->Vc[VX2][k][j][i - 1]
+                   +  d->Vc[VX2][k][j + 1][i]     + d->Vc[VX2][k][j][i]) / 4.0;
 
-	        v22[0] = (d->Vc[VX1][k][j + 1][i]     + d->Vc[VX1][k][j + 1][i + 1]
-						     + d->Vc[VX1][k][j][i + 1]      + d->Vc[VX1][k][j][i]) / 4.0;
+            v22[0] = (d->Vc[VX1][k][j + 1][i]     + d->Vc[VX1][k][j + 1][i + 1]
+                   +  d->Vc[VX1][k][j][i + 1]     + d->Vc[VX1][k][j][i]) / 4.0;
 
-	        v22[1] = (d->Vc[VX2][k][j + 1][i]     + d->Vc[VX2][k][j + 1][i + 1]
-						     +  d->Vc[VX2][k][j][i + 1]     + d->Vc[VX2][k][j][i]) / 4.0;
+            v22[1] = (d->Vc[VX2][k][j + 1][i]     + d->Vc[VX2][k][j + 1][i + 1]
+                   +  d->Vc[VX2][k][j][i + 1]     + d->Vc[VX2][k][j][i]) / 4.0;
 
-	        v21[0] = (d->Vc[VX1][k][j][i + 1]     + d->Vc[VX1][k][j - 1][i + 1]
-						     +  d->Vc[VX1][k][j - 1][i]     + d->Vc[VX1][k][j][i]) / 4.0;
+            v21[0] = (d->Vc[VX1][k][j][i + 1]     + d->Vc[VX1][k][j - 1][i + 1]
+                   +  d->Vc[VX1][k][j - 1][i]     + d->Vc[VX1][k][j][i]) / 4.0;
 
-	        v21[1] = (d->Vc[VX2][k][j][i + 1]     + d->Vc[VX2][k][j - 1][i + 1]
-						     +  d->Vc[VX2][k][j - 1][i]     + d->Vc[VX2][k][j][i]) / 4.0;
+            v21[1] = (d->Vc[VX2][k][j][i + 1]     + d->Vc[VX2][k][j - 1][i + 1]
+                   +  d->Vc[VX2][k][j - 1][i]     + d->Vc[VX2][k][j][i]) / 4.0;
 
+            /* now get the locations of the interpolation vertices
+               - these are stored at the start */
 
-          /* now get the locations of the interpolation vertices
-					- these are stored at the start */
+            x11[0] = x11_interp[0][k][j][i];
+            x11[1] = x11_interp[1][k][j][i];
+            x22[0] = x22_interp[0][k][j][i];
+            x22[1] = x22_interp[1][k][j][i];
 
-	        x11[0] = x11_interp[0][k][j][i];
-	        x11[1] = x11_interp[1][k][j][i];
-	        x22[0] = x22_interp[0][k][j][i];
-	        x22[1] = x22_interp[1][k][j][i];
+            /* we will be computing the velocity at two points in the direction
+               of the flux - we need to work out a sensible step across the
+               interpolation space. we first get the velocity at the cell centre
+               - this *should* match the actual cell center velocity, so we have a test */
 
-          /* we will be computing the velocity at two points in the direction
-					of the flux - we need to work out a sensible step across the
-					interpolation space. we first get the velocity at the cell centre
-					- this *should* match the actual cell center velocity, so we have a test */
+            loc[0] = x1[i] * UNIT_LENGTH;
+            loc[1] = x2[j];
 
-	        loc[0] = x1[i] * UNIT_LENGTH;
-	        loc[1] = x2[j];
+            bilinear(x11, x22, v11, v12, v21, v22, loc, ans1, 0);
 
-	        bilinear(x11, x22, v11, v12, v21, v22, loc, ans1, 0);
+            /* get the velocities at first location in cartesian coordinates */
 
-          /* get the velocities at first location in cartesian coordinates */
+            vx1 = (ans1[0] * UNIT_VELOCITY * sin(x2[j])
+                +  ans1[1] * UNIT_VELOCITY * cos(x2[j]));
 
-	        vx1 = (ans1[0] * UNIT_VELOCITY * sin(x2[j])
-					    +  ans1[1] * UNIT_VELOCITY * cos(x2[j]));
+            vz1 = (ans1[0] * UNIT_VELOCITY * cos(x2[j])
+                -  ans1[1] * UNIT_VELOCITY * sin(x2[j]));
 
-	        vz1 = (ans1[0] * UNIT_VELOCITY * cos(x2[j])
-					    -  ans1[1] * UNIT_VELOCITY * sin(x2[j]));
+            /* extract the second location which is stored for each angular bin */
 
-          /* extract the second location which is stored for each angular bin */
+            loc[0] = dvds_r_offset[iangle][k][j][i];
+            loc[1] = dvds_t_offset[iangle][k][j][i];
+            ds     = dvds_mod_offset[iangle][k][j][i];
 
-	        loc[0] = dvds_r_offset[iangle][k][j][i];
-	        loc[1] = dvds_t_offset[iangle][k][j][i];
-	        ds     = dvds_mod_offset[iangle][k][j][i];
+            /* this is a flag that there is no flux in this cell -
+               so dvds cant be calculated. a flag to later routines that
+               we dont have a flux here, so the gradient is undefined */
 
-          /* this is a flag that there is no flux in this cell -
-					   so dvds cant be calculated. a flag to later routines that
-					   we dont have a flux here, so the gradient is undefined */
+            if (ds == -999) {
+                dvds_array[iangle][k][j][i] = -999;
+            } else {
 
-	        if (ds == -999) {
-	            dvds_array[iangle][k][j][i] = -999;
-	        }else {
+                /* compute the velocity at the new offset point */
 
-          /* compute the velocity at the new offset point */
+                bilinear(x11, x22, v11, v12, v21, v22, loc, ans2, 0);
 
-	        bilinear(x11, x22, v11, v12, v21, v22, loc, ans2, 0);
+                /* get the velocities at second location in x,z coordinates */
 
-          /* get the velocities at second location in x,z coordinates */
+                vx2 = (ans2[0] * UNIT_VELOCITY * sin(loc[1])
+                    +  ans2[1] * UNIT_VELOCITY * cos(loc[1]));
 
-	        vx2 = (ans2[0] * UNIT_VELOCITY * sin(loc[1])
-							+  ans2[1] * UNIT_VELOCITY * cos(loc[1]));
+                vz2 = (ans2[0] * UNIT_VELOCITY * cos(loc[1])
+                    -  ans2[1] * UNIT_VELOCITY * sin(loc[1]));
 
-	        vz2 = (ans2[0] * UNIT_VELOCITY * cos(loc[1])
-							-  ans2[1] * UNIT_VELOCITY * sin(loc[1]));
+                /* we now have the two velocities, separated by a distance ds along the
+                   direction of flux. We now need the dot products of each along the
+                   flux direction. */
 
-          /* we now have the two velocities, separated by a distance ds along the
-             direction of flux. We now need the dot products of each along the
-             flux direction. */
+                mod_flux = sqrt(pow(flux_r_UV[iangle][k][j][i], 2)
+                             +   pow(flux_t_UV[iangle][k][j][i], 2)
+                             +   pow(flux_p_UV[iangle][k][j][i], 2));
 
-					mod_flux = sqrt(pow(flux_r_UV[iangle][k][j][i], 2)
-							     +      pow(flux_t_UV[iangle][k][j][i], 2)
-									 +      pow(flux_p_UV[iangle][k][j][i], 2));
+                theta_angle = (iangle + 0.5) * (2.0 * CONST_PI) / 36.0;
+                v1          = sin(theta_angle) * vx1 + cos(theta_angle) * vz1;
+                v2          = sin(theta_angle) * vx2 + cos(theta_angle) * vz2;
 
-					theta_angle = (iangle + 0.5) * (2.0 * CONST_PI) / 36.0;
-					v1 = sin(theta_angle) * vx1 + cos(theta_angle) * vz1;
-					v2 = sin(theta_angle) * vx2 + cos(theta_angle) * vz2;
+                /* these are the velocity gradients in physical quantities. */
+                dvds_array[iangle][k][j][i] = fabs((v2 - v1) / ds);
+            }
 
-          /* these are the velocity gradients in physical quantities. */
-	         dvds_array[iangle][k][j][i] = fabs((v2 - v1) / ds);
-	        }
+            if (dvds_array[iangle][k][j][i] != dvds_array[iangle][k][j][i]) {
+                printf("BOOM we have a nan in cycle %li iang=%i k=%i j=%i i=%i dvds_array %e flux %e %e %e %e ds %e\n",
+                       g_stepNumber, iangle, k, j, i,
+                       dvds_array[iangle][k][j][i],
+                       flux_r_UV[iangle][k][j][i],
+                       flux_t_UV[iangle][k][j][i],
+                       flux_p_UV[iangle][k][j][i],
+                       mod_flux, ds);
+                exit(0);
+            }
 
-	        if (dvds_array[iangle][k][j][i] != dvds_array[iangle][k][j][i]) {
-	            printf ("BOOM we have a nan in cycle %li iang=%i k=%i j=%i i=%i dvds_array %e flux %e %e %e %e ds %e\n",g_stepNumber,iangle,k,j,i,dvds_array[iangle][k][j][i],flux_r_UV[iangle][k][j][i],flux_t_UV[iangle][k][j][i],flux_p_UV[iangle][k][j][i],mod_flux,ds);
-	            exit(0);
-	        }
+        } /* this the end of the DOM_LOOP */
 
-			} // this the end of the DOM_LOOP
-
-	} // this is the end of the loop over angular bins
-
-
-
+    } /* this is the end of the loop over angular bins */
 }
 
 /* -------------------------------------------------------------------------- */
 
-void bilinear (double x11[2], double x22[2], double v11[2], double v12[2],
-	             double v21[2], double v22[2], double test[2], double ans[2], int flag)
-
+void bilinear(double x11[2], double x22[2], double v11[2], double v12[2],
+              double v21[2], double v22[2], double test[2], double ans[2], int flag)
 {
-   double fracx1, fracx2;
-   double temp1, temp2;
+    double fracx1, fracx2;
+    double temp1, temp2;
 
-   fracx1 = (test[0] - x11[0]) / (x22[0] - x11[0]);   /* x1 direction */
-   fracx2 = (test[1] - x11[1]) / (x22[1] - x11[1]);   /* x2 direction */
+    fracx1 = (test[0] - x11[0]) / (x22[0] - x11[0]);   /* x1 direction */
+    fracx2 = (test[1] - x11[1]) / (x22[1] - x11[1]);   /* x2 direction */
 
-	 if (flag == 1)
+    if (flag == 1) {
+        printf("BOOM frac1=%e frac2=%e\n", fracx1, fracx2);
+    }
 
-     printf ("BOOM frac1=%e frac2=%e\n", fracx1, fracx2);
+    temp1 = (1.0 - fracx1) * v11[0] + fracx1 * v21[0]; /* vx1 interpolation at the bottom of the cell */
+    temp2 = (1.0 - fracx1) * v12[0] + fracx1 * v22[0]; /* vx1 interpolation at the top of the cell */
 
-     temp1 = (1.0 - fracx1) * v11[0] + fracx1 * v21[0]; /* vx1 interpolation at the bottom of the cell */
-     temp2 = (1.0 - fracx1) * v12[0] + fracx1 * v22[0]; /* vx1 interpolation at the bottom of the cell */
+    if (flag == 1) {
+        printf("BOOM temp1=%e temp2=%e\n", temp1, temp2);
+    }
 
-     if (flag == 1)
+    ans[0] = (1.0 - fracx2) * temp1 + fracx2 * temp2;  /* vx1 interpolation in the theta direction */
 
-       printf ("BOOM temp1=%e temp2=%e\n", temp1, temp2);
+    temp1  = (1.0 - fracx1) * v11[1] + fracx1 * v21[1]; /* vx2 interpolation at the bottom of the cell */
+    temp2  = (1.0 - fracx1) * v12[1] + fracx1 * v22[1]; /* vx2 interpolation at the top of the cell */
 
-       ans[0] = (1.0 - fracx2) * temp1 + fracx2 * temp2;  /* vx1 interpolation in the theta direction */
+    ans[1] = (1.0 - fracx2) * temp1 + fracx2 * temp2;  /* vx2 interpolation in the theta direction */
 
-       temp1  = (1.0 - fracx1) * v11[1] + fracx1 * v21[1]; /* vx2 interpolation at the bottom of the cell */
-       temp2  = (1.0 - fracx1) * v12[1] + fracx1 * v22[1]; /* vx2 interpolation at the top of the cell */
-
-       ans[1] = (1.0 - fracx2) * temp1 + fracx2 * temp2;  //vx2 interpolation in the theta direction
-
-		   if (flag == 1)
-       	printf ("v11 %e v12 %e v21 %e v22 %e\n",v11[0], v12[0], v21[0], v22[0]);
-
+    if (flag == 1) {
+        printf("v11 %e v12 %e v21 %e v22 %e\n", v11[0], v12[0], v21[0], v22[0]);
+    }
 }
 
-
+/* -------------------------------------------------------------------------- */
+/* ROBUST linterp: guards against bad table data and avoids returning NaN     */
+/* -------------------------------------------------------------------------- */
 
 double linterp(double x, double xarray[], double yarray[], int nelem)
-
 {
-    int idx = 0;
-    double result, slope;
+    int    idx;
+    double result;
+    double slope;
+    double x_low, x_high, y_low, y_high;
+    double expo;
 
+    idx    = 0;
+    result = 0.0;
+    slope  = 0.0;
+    x_low  = 0.0;
+    x_high = 0.0;
+    y_low  = 0.0;
+    y_high = 0.0;
+    expo   = 0.0;
+
+    if (nelem <= 0) {
+        /* empty table – nothing sensible to do */
+        return 0.0;
+    }
 
     while (idx < nelem && xarray[idx] < x) {
         idx++;
     }
 
     if (idx == 0) {
-        result = pow(10.0, yarray[0]);
+
+        expo   = yarray[0];
+        result = pow(10.0, expo);
+
     } else if (idx >= nelem) {
-        result = pow(10.0, yarray[nelem - 1]);
+
+        expo   = yarray[nelem - 1];
+        result = pow(10.0, expo);
+
     } else {
-        double x_low = xarray[idx - 1];
-        double x_high = xarray[idx];
-        double y_low = yarray[idx - 1];
-        double y_high = yarray[idx];
-        slope = (y_high - y_low) / (x_high - x_low);
-        result = pow(10.0, y_low + slope * (x - x_low));
+
+        x_low  = xarray[idx - 1];
+        x_high = xarray[idx];
+        y_low  = yarray[idx - 1];
+        y_high = yarray[idx];
+
+        /* Guard against bad table data */
+        if (!isfinite(x_low)  || !isfinite(x_high) ||
+            !isfinite(y_low)  || !isfinite(y_high) ||
+            x_high == x_low) {
+
+            printf("Bad data in linterp(): x=%e idx=%d nelem=%d "
+                   "x_low=%e x_high=%e y_low=%e y_high=%e\n",
+                   x, idx, nelem, x_low, x_high, y_low, y_high);
+
+            result = 0.0;
+
+        } else {
+
+            slope  = (y_high - y_low) / (x_high - x_low);
+            expo   = y_low + slope * (x - x_low);
+            result = pow(10.0, expo);
+        }
     }
 
-    if (isnan(result)) {
-        printf("Error: NaN detected in linterp()! x=%e idx=%d nelem=%d\n", x, idx, nelem);
+    if (!isfinite(result)) {
+        printf("Error: NaN/Inf detected in linterp()! x=%e idx=%d nelem=%d\n",
+               x, idx, nelem);
         result = 0.0;
     }
 
     return result;
 }
 
-#endif
+#endif /* LINE_DRIVEN_WIND != NO */
+
+/* ********************************************************************* */
 
 void LineForce(double *v, double *grad, double x1, double x2, double x3, int i, int j, int k)
-
 /*!
  * \brief Computes the radiation acceleration vector based on spatial coordinates
  *        and the vector of primitive variables.
@@ -827,77 +909,83 @@ void LineForce(double *v, double *grad, double x1, double x2, double x3, int i, 
  * \param [in]  x2   Position in the second coordinate direction (\f$x_2\f$).
  * \param [in]  x3   Position in the third coordinate direction (\f$x_3\f$).
  */
+{
+    int iangle, ii;
+    double M_UV_array[MPOINTS];
 
+    double sigma_e;    /* Electron scattering cross-section */
+    double rho;        /* Density in physical units */
+    double T_iso;      /* Isothermal temperature */
+    double mu;         /* Mean particle mass */
+    double krad;
+    double alpharad;
+    double flux_r, flux_t, t_UV, M_UV;
+    double Luv;        /* Central UV luminosity */
+    double v_th;       /* Thermal velocity */
+    double T;
+    double M_max;
 
- {
+    sigma_e = CONST_sigmaT / CONST_amu / 1.18;
+    rho     = v[RHO] * UNIT_DENSITY;
+    T_iso   = g_inputParam[T_ISO];
+    mu      = g_inputParam[MU];
+    krad    = g_inputParam[KRAD];
+    alpharad = g_inputParam[ALPHARAD];
+    Luv     = g_inputParam[L_star] * g_inputParam[f_uv];
+    M_max   = 4400.0;
 
-   int iangle, ii;
-   double M_UV_array[MPOINTS];
+    #if EOS != ISOTHERMAL
+    T = v[PRS] / v[RHO] * KELVIN * mu;    /* compute initial temperature in Kelvin */
+    #else
+    T = T_iso;
+    #endif
 
-   double sigma_e = CONST_sigmaT / CONST_amu / 1.18; // Electron scattering cross-section
-   double rho = v[RHO] * UNIT_DENSITY;               // Density in physical units
-   double T_iso = g_inputParam[T_ISO];               // Isothermal temperature
-   double mu = g_inputParam[MU];                     // Mean particle mass
-   double krad = g_inputParam[KRAD];
-   double alpharad = g_inputParam[ALPHARAD];
-   double flux_r, flux_t, t_UV, M_UV;
-   double Luv = g_inputParam[L_star] * g_inputParam[f_uv]; // Central UV luminosity
-   double v_th;                                      // Thermal velocity
-   double T;
-   double M_max = 4400.;
+    if (krad == 999 && alpharad == 999) {
+        for (ii = 0; ii < MPOINTS; ii++) {
+            M_UV_array[ii] = M_UV_fit[ii][k][j][i];
+        }
+    }
 
-
-
-   #if EOS != ISOTHERMAL
-     T = v[PRS] / v[RHO] * KELVIN * mu;    /* compute initial temperature in Kelvin */
-   #else
-     T = T_iso;
-   #endif
-
-
-   if (krad == 999 && alpharad == 999) {
-     for (ii = 0; ii < MPOINTS; ii++) {
-        M_UV_array[ii] = M_UV_fit[ii][k][j][i];
-     }
-   }
-
-    // Calculate thermal velocity for hydrogen
+    /* Calculate thermal velocity for hydrogen */
     v_th = sqrt((2.0 * CONST_kB * T) / CONST_mp);
 
-    // Initialize acceleration components
+    /* Initialize acceleration components */
     grad[IDIR] = 0.0;
     grad[JDIR] = 0.0;
     grad[KDIR] = 0.0;
 
-     // Loop over all directions to compute the radiative force
-     for (int iangle = 0; iangle < NFLUX_ANGLES; iangle++) {
-         // Get the flux components in the current direction
-         flux_r = flux_r_UV[iangle][k][j][i];
-         flux_t = flux_t_UV[iangle][k][j][i];
+    /* Loop over all directions to compute the radiative force */
+    for (iangle = 0; iangle < NFLUX_ANGLES; iangle++) {
 
+        /* Get the flux components in the current direction */
+        flux_r = flux_r_UV[iangle][k][j][i];
+        flux_t = flux_t_UV[iangle][k][j][i];
 
-         if (dvds_array[iangle][k][j][i] > 0.0) {
-             // Compute the optical depth parameter
-             t_UV = sigma_e * rho * v_th / dvds_array[iangle][k][j][i];
+        if (dvds_array[iangle][k][j][i] > 0.0) {
 
-             // Calculate the force multiplier
-             if (krad == 999 && alpharad == 999) {
-                 double log10_t_UV = log10(t_UV);
-                 M_UV = linterp(log10_t_UV, t_fit, M_UV_array, MPOINTS);
-             } else {
-                 M_UV = krad * pow(t_UV, alpharad);
-             }
+            /* Compute the optical depth parameter */
+            t_UV = sigma_e * rho * v_th / dvds_array[iangle][k][j][i];
 
-             // Cap the force multiplier to M_max
-             if (M_UV > M_max) {
-                 M_UV = M_max;
-             }
-         } else {
-             M_UV = 0.0; // If dv/ds is non-positive, no line force
-         }
+            /* Calculate the force multiplier */
+            if (krad == 999 && alpharad == 999) {
+                double log10_t_UV;
+                log10_t_UV = log10(t_UV);
+                M_UV       = linterp(log10_t_UV, t_fit, M_UV_array, MPOINTS);
+            } else {
+                M_UV = krad * pow(t_UV, alpharad);
+            }
 
-         // Add the contribution of the current direction to the total acceleration
-         grad[IDIR] += ((1.0 + M_UV) * sigma_e * flux_r / CONST_c) / UNIT_ACCELERATION;
-         grad[JDIR] += ((1.0 + M_UV) * sigma_e * flux_t / CONST_c) / UNIT_ACCELERATION;
-     }
- }
+            /* Cap the force multiplier to M_max */
+            if (M_UV > M_max) {
+                M_UV = M_max;
+            }
+
+        } else {
+            M_UV = 0.0; /* If dv/ds is non-positive, no line force */
+        }
+
+        /* Add the contribution of the current direction to the total acceleration */
+        grad[IDIR] += ((1.0 + M_UV) * sigma_e * flux_r / CONST_c) / UNIT_ACCELERATION;
+        grad[JDIR] += ((1.0 + M_UV) * sigma_e * flux_t / CONST_c) / UNIT_ACCELERATION;
+    }
+}

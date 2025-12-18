@@ -73,7 +73,7 @@ if t0 == 0.0:
     log("We need to run for at least one second, dummy")
     t0 = 1.256637061
 
-init_sir_cycles = 2   # Initial number of cycles that SIROCCO will perform
+init_sir_cycles = 5   # Initial number of cycles that SIROCCO will perform
 sir_cycles = 2        # Number of cycles in SIROCCO once started
 
 # -------------------------------------------------------------------------

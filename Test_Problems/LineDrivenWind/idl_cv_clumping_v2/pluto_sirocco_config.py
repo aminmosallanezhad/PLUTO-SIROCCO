@@ -73,8 +73,8 @@ data = {
     # Wind and line transfer properties
     "wind_radiation": "yes",     # Wind radiation enabled
     "line_trans": "macro",      # Line transfer mode
-    "RAD_CODE": "py",
-    "RAD_CODE_VER":"88"
+    "RAD_CODE": "sirocco",
+    "RAD_CODE_VER":"-1.2"
 }
 
 # End of script

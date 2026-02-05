@@ -47,7 +47,6 @@
 #define  SHOCK_FLATTENING               MULTID
 #define  CHAR_LIMITING                  YES
 #define  LIMITER                        VANLEER_LIM
-#define  FAILSAFE                       YES
 #define  PPM_ORDER                      4
 #define  UNIT_DENSITY                   1e-9
 #define  UNIT_LENGTH                    8.7e8

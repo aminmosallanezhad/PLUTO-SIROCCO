@@ -242,21 +242,21 @@ void UserDefBoundary (const Data *d, RBox *box, int side, Grid *grid)
 
 						 d->Vc[RHO][k][j][i] = dfloor;
 
-						 #if HAVE_ENERGY
-								 if (d->Vc[PRS][k][j][i] < pfloor) {
-										 d->Vc[PRS][k][j][i] = pfloor;
-								}
-						 #endif
+						 // #if HAVE_ENERGY
+							// 	 if (d->Vc[PRS][k][j][i] < pfloor) {
+							// 			 d->Vc[PRS][k][j][i] = pfloor;
+							// 	}
+						 // #endif
 
 						 convert_to_cons = 1;
 				 }
 
-				 #if HAVE_ENERGY
-						 if (d->Vc[PRS][k][j][i] < pfloor) {
-								 d->Vc[PRS][k][j][i] = pfloor;
-								convert_to_cons = 1;
-						}
-				 #endif
+				 // #if HAVE_ENERGY
+					// 	 if (d->Vc[PRS][k][j][i] < pfloor) {
+					// 			 d->Vc[PRS][k][j][i] = pfloor;
+					// 			convert_to_cons = 1;
+					// 	}
+				 // #endif
 
 
 
